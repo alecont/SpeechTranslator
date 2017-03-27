@@ -103,7 +103,7 @@ namespace Microsoft.MT.Api.TestUtils
                 //Skip setting the voice in case of yue (Cantonese). Server side bug.
                 query.AppendFormat("from={0}&to={1}", options.TranslateFrom, options.TranslateTo);
             else
-                query.AppendFormat("from={0}&to={1}&voice={2}", options.TranslateFrom, options.TranslateTo, options.Voice);
+                query.AppendFormat("from={0}&to={1}&voice={2}", options.TranslateFrom, options.TranslateTo, options.Voice);            
             if (!String.IsNullOrWhiteSpace(options.Features))
             {
                 query.AppendFormat("&features={0}", options.Features);

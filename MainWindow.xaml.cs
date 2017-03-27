@@ -103,6 +103,9 @@ namespace SpeechTranslator
 
         Stopwatch stopwatch = new Stopwatch();
 
+        private string[] sourcePhrases;
+        private string currentPhrase;
+
         /// <summary>
         /// Holds one utterance for the transcript
         /// </summary>
@@ -117,12 +120,14 @@ namespace SpeechTranslator
         /// Holds the set of utterances in this conversation;
         /// </summary>
         private List<TranscriptUtterance> Transcript = new List<TranscriptUtterance>();
-
+        private PhraseBook phraseBook;
 
         public MainWindow()
         {
             InitializeComponent();
             Debug.Print("This is a debug message");
+
+            phraseBook = new PhraseBook();
 
             Closing += MainWindow_Closing;
             if (miniwindow != null) miniwindow.Closing += Miniwindow_Closing;
@@ -319,11 +324,13 @@ namespace SpeechTranslator
 
                 if (Properties.Settings.Default.FromLanguageIndex >= 0) FromLanguage.SelectedIndex = Properties.Settings.Default.FromLanguageIndex;
                 if (Properties.Settings.Default.ToLanguageIndex >= 0) ToLanguage.SelectedIndex = Properties.Settings.Default.ToLanguageIndex;
+                /*
                 else
                 {
                     Random rnd = new Random(DateTime.Now.Millisecond);
                     ToLanguage.SelectedIndex = (rnd.Next() % textLanguages.Count);
                 }
+                */
             }
         }
 
@@ -372,6 +379,8 @@ namespace SpeechTranslator
                 DialogRecognition.HorizontalAlignment = System.Windows.HorizontalAlignment.Right;
             }
             Transcript.Clear();
+
+            sourcePhrases = phraseBook.GetPhrases(code);
         }
 
         private void UpdateVoiceComboBox(System.Windows.Controls.ComboBox voiceComboBox, ComboBoxItem languageSelectedItem)
@@ -431,6 +440,7 @@ namespace SpeechTranslator
                 case UiState.ReadyToConnect:
                     stopwatch.Start();
                     Connect();
+                    SourceText.Text = "Read aloud : " + currentPhrase;
                     break;
                 case UiState.Connected:
                     stopwatch.Stop();
@@ -487,6 +497,7 @@ namespace SpeechTranslator
                                 utterance.Translation = final.Translation;
                                 utterance.Timespan = stopwatch.Elapsed;
                                 Transcript.Add(utterance);
+                                SafeInvoke(() => ScorePhrase(final.Recognition));
                             }
                             if (msg.GetType() == typeof(PartialResultMessage))
                             {
@@ -602,9 +613,13 @@ namespace SpeechTranslator
             {
                 voicename = ((ComboBoxItem)this.Voice.SelectedItem).Tag.ToString();
             }
+
+            string fromLanguage = ((ComboBoxItem)this.FromLanguage.SelectedItem).Tag.ToString();
+            this.currentPhrase = phraseBook.GetPhrase(fromLanguage);
+
             options = new SpeechTranslateClientOptions()
             {
-                TranslateFrom = ((ComboBoxItem)this.FromLanguage.SelectedItem).Tag.ToString(),
+                TranslateFrom = fromLanguage,
                 TranslateTo = ((ComboBoxItem)this.ToLanguage.SelectedItem).Tag.ToString(),
                 Voice = voicename,
             };
@@ -1086,6 +1101,100 @@ namespace SpeechTranslator
             if (bottom2 != null) this.BottomRun2.Text = bottom2;
         }
 
+        string Normalize(string source)
+        {
+            string res = string.Empty;
+            foreach(char c in source)
+            {
+                if(char.IsLetterOrDigit(c) || char.IsWhiteSpace(c) )
+                {
+                    res += char.ToUpperInvariant(c);
+                }
+            }
+            return res;
+        }
+
+        /// <summary>
+        /// Compare the recognized utterance with the current source phrase and score points.
+        /// </summary>
+        /// <param name="recognition"></param>
+        private void ScorePhrase(string recognition)
+        {
+            string result = Normalize(recognition);
+            string target = Normalize(currentPhrase);
+            if(result == target)
+            {
+                // 100% match!
+                this.SourceText.Text = "100% match! Great!";
+                Log("100% match! Great!");
+            }
+            else
+            {
+                int errors = 0;
+                char[] sep = new char[] { ' ' };
+                string[] resultWords = result.Split(sep);
+                string[] targetWords = target.Split(sep);
+                int rCount = resultWords.Length;
+                int tCount = targetWords.Length;
+                int rIndex = 0, tIndex = 0;
+                while(rIndex < rCount)
+                {
+                    if (tIndex >= tCount)
+                        break;
+
+                    if(resultWords[rIndex] == targetWords[tIndex])
+                    {
+                        rIndex++;
+                        if (tIndex < tCount)
+                            tIndex++;
+                    }
+                    else
+                    {
+                        // look ahead in tIndex
+                        if (tIndex < tCount)
+                        {
+                            if(resultWords[rIndex] == targetWords[tIndex+1])
+                            {
+                                // skipped word
+                                // "word" == "blah word" (blah is not in the result)
+                                rIndex++;
+                                tIndex+=2;
+                                errors++;
+                            }
+                            else if(rIndex < rCount)
+                            {
+                                if (resultWords[rIndex+1] == targetWords[tIndex])
+                                {
+                                    // extra word
+                                    // "oops word" == "word" (oops is not in the expected target)
+                                    rIndex+=2;
+                                    tIndex++;
+                                    errors++;
+                                }
+                                else // words are different, even skipping one is no use.
+                                {
+                                    rIndex++;
+                                    tIndex++;
+                                    errors++;
+                                }
+                            }    
+                            // else we are done.                        
+                        }
+                        else
+                        {
+                            // no more target words, so we have an extra word in the result.
+                            errors++;
+                            break;
+                        }
+                    }
+                } // end while
+
+                string score = string.Format("Matched {0}/{1} words.", tCount - errors, tCount);
+                SourceText.Text = score;
+                Log(score);
+
+            }
+        }
 
         //this method shows the audio input if an audio file is selected
         private void UpdateUiForInputAudioOnOff(bool isOn)
